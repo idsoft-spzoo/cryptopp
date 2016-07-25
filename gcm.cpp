@@ -260,9 +260,9 @@ void GCM_Base::SetKeyWithoutResync(const byte *userKey, size_t keylength, const 
 		const __m128i r = s_clmulConstants[0];
 		const __m128i t = _mm_load_si128((__m128i *)(void *)hashKey);
 		const __m128i h0 = _mm_shuffle_epi8(t, s_clmulConstants[1]);
-		__m128i h = h0;
 
-		for (i=0; i<tableSize; i+=32)
+		__m128i h = h0;
+		for (i=0; i<tableSize-32; i+=32)
 		{
 			const __m128i h1 = CLMUL_GF_Mul(h, h0, r);
 			_mm_storel_epi64((__m128i *)(void *)(table+i), h);
@@ -272,24 +272,24 @@ void GCM_Base::SetKeyWithoutResync(const byte *userKey, size_t keylength, const 
 			h = CLMUL_GF_Mul(h1, h0, r);
 		}
 
+		const __m128i h1 = CLMUL_GF_Mul(h, h0, r);
+		_mm_storel_epi64((__m128i *)(void *)(table+i), h);
+		_mm_storeu_si128((__m128i *)(void *)(table+i+16), h1);
+		_mm_storeu_si128((__m128i *)(void *)(table+i+8), h);
+		_mm_storel_epi64((__m128i *)(void *)(table+i+8), h1);
+
 		return;
 	}
 #elif CRYPTOPP_BOOL_ARM_CRYPTO_AVAILABLE
 	if (HasPMULL())
 	{
 		const uint64x2_t r = s_clmulConstants[0];
-		const uint64x2_t t = (uint64x2_t)vrev64q_u8((uint8x16_t)vld1q_u64((uint64_t *)hashKey));
-		const uint64x2_t h0 = vcombine_u64(vget_high_u64(t), vget_low_u64(t));
+		const uint64x2_t t = vld1q_u64((uint64_t *)hashKey);
+		const uint64x2_t h0 = (uint64x2_t)vrev64q_u8((uint8x16_t)vcombine_u64(vget_high_u64(t), vget_low_u64(t)));
+
 		uint64x2_t h = h0;
-
-		for (i=0; i<tableSize; i+=32)
+		for (i=0; i<tableSize-32; i+=32)
 		{
-			//__m128i h1 = PMULL_GF_Mul(h, h0, r);
-			//_mm_storel_epi64((__m128i *)(table+i), h);
-			//_mm_storeu_si128((__m128i *)(table+i+16), h1);
-			//_mm_storeu_si128((__m128i *)(table+i+8), h);
-			//_mm_storel_epi64((__m128i *)(table+i+8), h1);
-
 			const uint64x2_t h1 = PMULL_GF_Mul(h, h0, r);
 			vst1_u64((uint64_t *)(table+i), vget_low_u64(h));
 			vst1q_u64((uint64_t *)(table+i+16), h1);
@@ -297,6 +297,12 @@ void GCM_Base::SetKeyWithoutResync(const byte *userKey, size_t keylength, const 
 			vst1_u64((uint64_t *)(table+i+8), vget_low_u64(h1));
 			h = PMULL_GF_Mul(h1, h0, r);
 		}
+
+		const uint64x2_t h1 = PMULL_GF_Mul(h, h0, r);
+		vst1_u64((uint64_t *)(table+i), vget_low_u64(h));
+		vst1q_u64((uint64_t *)(table+i+16), h1);
+		vst1q_u64((uint64_t *)(table+i+8), h);
+		vst1_u64((uint64_t *)(table+i+8), vget_low_u64(h1));
 
 		return;
 	}
