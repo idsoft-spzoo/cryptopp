@@ -240,6 +240,14 @@ void GCM_Base::SetKeyWithoutResync(const byte *userKey, size_t keylength, const 
 		tableSize = s_clmulTableSizeInBlocks * REQUIRED_BLOCKSIZE;
 	}
 	else
+#elif CRYPTOPP_BOOL_ARM_CRYPTO_AVAILABLE
+	if (HasPMULL())
+	{
+		// Avoid "parameter not used" error and suppress Coverity finding
+		(void)params.GetIntValue(Name::TableSize(), tableSize);
+		tableSize = s_clmulTableSizeInBlocks * REQUIRED_BLOCKSIZE;
+	}
+	else
 #endif
 	{
 		if (params.GetIntValue(Name::TableSize(), tableSize))
@@ -283,8 +291,8 @@ void GCM_Base::SetKeyWithoutResync(const byte *userKey, size_t keylength, const 
 	{
 		const uint64x2_t r = s_clmulConstants[0];
 		// uint64x2_t h0 = _mm_shuffle_epi8(_mm_load_si128((uint64x2_t *)hashKey), s_clmulConstants[1]);
-		uint64x2_t h0 = _mm_shuffle_epi8(vld1q_u64((uint64_t *)hashKey), s_clmulConstants[1]);
-		uint64x2_t h = h0;
+		// TODO: uint64x2_t h0 = _mm_shuffle_epi8(vld1q_u64((uint64_t *)hashKey), s_clmulConstants[1]);
+		uint64x2_t h0; uint64x2_t h = h0;
 
 		for (i=0; i<tableSize; i+=32)
 		{
@@ -418,7 +426,7 @@ inline void GCM_Base::ReverseHashBufferIfNeeded()
 	if (HasPMULL())
 	{
 		uint64x2_t &x = *(uint64x2_t*)HashBuffer();
-		x = _mm_shuffle_epi8(x, s_clmulConstants[1]);
+		// TODO: x = _mm_shuffle_epi8(x, s_clmulConstants[1]);
 	}
 #endif
 }
