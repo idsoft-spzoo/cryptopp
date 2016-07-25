@@ -13,17 +13,15 @@
 #ifndef CRYPTOPP_GENERATE_X64_MASM
 
 // Clang 3.3 integrated assembler crash on Linux. MacPorts GCC compile error. SunCC crash under Sun Studio 12.5 and below.
-#if (defined(CRYPTOPP_LLVM_CLANG_VERSION) && (CRYPTOPP_LLVM_CLANG_VERSION < 30400)) || defined(CRYPTOPP_CLANG_INTEGRATED_ASSEMBLER) || (__SUNPRO_CC <= 0x5140)
-# undef CRYPTOPP_X86_ASM_AVAILABLE
-# undef CRYPTOPP_X32_ASM_AVAILABLE
+#if (defined(CRYPTOPP_LLVM_CLANG_VERSION) && (CRYPTOPP_LLVM_CLANG_VERSION < 30400)) || defined(CRYPTOPP_CLANG_INTEGRATED_ASSEMBLER) || (defined(__SUNPRO_CC) && __SUNPRO_CC <= 0x5140)
 # undef CRYPTOPP_X64_ASM_AVAILABLE
 # undef CRYPTOPP_BOOL_SSE2_AVAILABLE
-# undef CRYPTOPP_BOOL_SSSE3_AVAILABLE
 # undef CRYPTOPP_BOOL_AESNI_AVAILABLE
 # define CRYPTOPP_BOOL_SSE2_AVAILABLE 0
-# define CRYPTOPP_BOOL_SSSE3_AVAILABLE 0
 # define CRYPTOPP_BOOL_AESNI_AVAILABLE 0
 #endif
+
+// #undef CRYPTOPP_BOOL_NEON_AVAILABLE
 
 #include "gcm.h"
 #include "cpu.h"
@@ -88,6 +86,16 @@ inline static void SSE2_Xor16(byte *a, const byte *b, const byte *c)
 }
 #endif
 
+#if CRYPTOPP_BOOL_NEON_AVAILABLE
+inline static void NEON_Xor16(byte *a, const byte *b, const byte *c)
+{
+	assert(IsAlignedOn(a,GetAlignmentOf<uint64x2_t>()));
+	assert(IsAlignedOn(b,GetAlignmentOf<uint64x2_t>()));
+	assert(IsAlignedOn(c,GetAlignmentOf<uint64x2_t>()));
+	*(uint64x2_t*)a = veorq_u64(*(uint64x2_t*)b, *(uint64x2_t*)c);
+}
+#endif
+
 inline static void Xor16(byte *a, const byte *b, const byte *c)
 {
 	assert(IsAlignedOn(a,GetAlignmentOf<word64>()));
@@ -97,12 +105,16 @@ inline static void Xor16(byte *a, const byte *b, const byte *c)
 	((word64 *)(void *)a)[1] = ((word64 *)(void *)b)[1] ^ ((word64 *)(void *)c)[1];
 }
 
-#if CRYPTOPP_BOOL_AESNI_AVAILABLE
+#if CRYPTOPP_BOOL_AESNI_AVAILABLE || CRYPTOPP_BOOL_ARM_CRYPTO_AVAILABLE
 CRYPTOPP_ALIGN_DATA(16)
 static const word64 s_clmulConstants64[] = {
 	W64LIT(0xe100000000000000), W64LIT(0xc200000000000000),
 	W64LIT(0x08090a0b0c0d0e0f), W64LIT(0x0001020304050607),
 	W64LIT(0x0001020304050607), W64LIT(0x08090a0b0c0d0e0f)};
+#endif
+
+#if CRYPTOPP_BOOL_AESNI_AVAILABLE
+
 static const __m128i *s_clmulConstants = (const __m128i *)(const void *)s_clmulConstants64;
 static const unsigned int s_clmulTableSizeInBlocks = 8;
 
@@ -145,6 +157,66 @@ inline __m128i CLMUL_GF_Mul(const __m128i &x, const __m128i &h, const __m128i &r
 	__m128i c2 = _mm_clmulepi64_si128(x,h,0x11);
 
 	return CLMUL_Reduce(c0, c1, c2, r);
+}
+#endif
+
+#if CRYPTOPP_BOOL_ARM_CRYPTO_AVAILABLE
+
+static const uint64x2_t *s_clmulConstants = (const uint64x2_t *)s_clmulConstants64;
+static const unsigned int s_clmulTableSizeInBlocks = 8;
+
+inline uint64x2_t PMULL_Reduce(uint64x2_t c0, uint64x2_t c1, uint64x2_t c2, const uint64x2_t &r)
+{
+	/*
+	The polynomial to be reduced is c0 * x^128 + c1 * x^64 + c2. c0t below refers to the most
+	significant half of c0 as a polynomial, which, due to GCM's bit reflection, are in the
+	rightmost bit positions, and the lowest byte addresses.
+
+	c1 ^= c0t * 0xc200000000000000
+	c2t ^= c0t
+	t = shift (c1t ^ c0b) left 1 bit
+	c2 ^= t * 0xe100000000000000
+	c2t ^= c1b
+	shift c2 left 1 bit and xor in lowest bit of c1t
+	*/
+
+	uint64x2_t t = vdupq_n_u64(0);
+	c2 = veorq_u64(c2, vsetq_lane_u64(vgetq_lane_u64(c0, 0), t, 0));
+
+	// c1 = veorq_u64(c1, _mm_clmulepi64_si128(c0, r, 0x10));
+	c1 = (uint64x2_t)vmull_p64(vgetq_lane_u64(c0, 0), vgetq_lane_u64(r, 1));
+
+	// c0 = _mm_srli_si128(c0, 8);
+	c0 = (uint64x2_t)vmaxq_u8((uint8x16_t)c0, vextq_u8((uint8x16_t)c0, vdupq_n_u8(0), 8));
+	t = veorq_u64(c0, c1); c0 = vshlq_n_u64(t, 1);
+
+	// c0 = _mm_clmulepi64_si128(c0, r, 0);
+	c0 = (uint64x2_t)vmull_p64(vgetq_lane_u64(c0, 0), vgetq_lane_u64(r, 0));
+
+	c2 = veorq_u64(c2, c0);
+	// c2 = veorq_u64(c2, _mm_srli_si128(c1, 8));
+	c2 = veorq_u64(c2, (uint64x2_t)vmaxq_u8((uint8x16_t)c1, vextq_u8((uint8x16_t)c1, vdupq_n_u8(0), 8)));
+	// c1 = _mm_unpacklo_epi64(c1, c2);
+	c1 = vcombine_u64(vgetq_lane_u64(c1, 0), vgetq_lane_u64(c2, 0));
+
+	c1 = vshrq_n_u64(c1, 63);
+	c2 = vshlq_n_u64(c2, 1);
+	return veorq_u64(c2, c1);
+}
+
+inline uint64x2_t PMULL_GF_Mul(const uint64x2_t &x, const uint64x2_t &h, const uint64x2_t &r)
+{
+	// uint64x2_t c0 = _mm_clmulepi64_si128(x,h,0);
+	uint64x2_t c0 = (uint64x2_t)vmull_p64(vgetq_lane_u64(x, 0), vgetq_lane_u64(h, 0));
+
+	// uint64x2_t c1 = veorq_u64(_mm_clmulepi64_si128(x,h,1), _mm_clmulepi64_si128(x,h,0x10));
+	uint64x2_t c1 = veorq_u64((uint64x2_t)vmull_p64(vgetq_lane_u64(x, 1), vgetq_lane_u64(h,0)),
+						(uint64x2_t)vmull_p64(vgetq_lane_u64(x, 0), vgetq_lane_u64(h, 1)));
+
+	// uint64x2_t c2 = _mm_clmulepi64_si128(x,h,0x11);
+	uint64x2_t c2 = (uint64x2_t)vmull_high_p64((poly64x2_t)x, (poly64x2_t)h);
+
+	return PMULL_Reduce(c0, c1, c2, r);
 }
 #endif
 
@@ -204,6 +276,32 @@ void GCM_Base::SetKeyWithoutResync(const byte *userKey, size_t keylength, const 
 
 		return;
 	}
+#elif CRYPTOPP_BOOL_ARM_CRYPTO_AVAILABLE
+	if (HasPMULL())
+	{
+		const uint64x2_t r = s_clmulConstants[0];
+		// uint64x2_t h0 = _mm_shuffle_epi8(_mm_load_si128((uint64x2_t *)hashKey), s_clmulConstants[1]);
+		uint64x2_t h0 = _mm_shuffle_epi8(vld1q_u64((uint64_t *)hashKey), s_clmulConstants[1]);
+		uint64x2_t h = h0;
+
+		for (i=0; i<tableSize; i+=32)
+		{
+			//__m128i h1 = PMULL_GF_Mul(h, h0, r);
+			//_mm_storel_epi64((__m128i *)(table+i), h);
+			//_mm_storeu_si128((__m128i *)(table+i+16), h1);
+			//_mm_storeu_si128((__m128i *)(table+i+8), h);
+			//_mm_storel_epi64((__m128i *)(table+i+8), h1);
+
+			uint64x2_t h1 = PMULL_GF_Mul(h, h0, r);
+			vst1_u64((uint64_t *)(table+i), vget_low_u64(h));
+			vst1q_u64((uint64_t *)(table+i+16), h1);
+			vst1q_u64((uint64_t *)(table+i+8), h);
+			vst1_u64((uint64_t *)(table+i+8), vget_low_u64(h1));
+			h = PMULL_GF_Mul(h1, h0, r);
+		}
+
+		return;
+	}
 #endif
 
 	word64 V0, V1;
@@ -230,6 +328,12 @@ void GCM_Base::SetKeyWithoutResync(const byte *userKey, size_t keylength, const 
 				for (j=2; j<=0x80; j*=2)
 					for (k=1; k<j; k++)
 						SSE2_Xor16(table+i*256*16+(j+k)*16, table+i*256*16+j*16, table+i*256*16+k*16);
+			else
+#elif CRYPTOPP_BOOL_NEON_AVAILABLE
+			if (HasNEON())
+				for (j=2; j<=0x80; j*=2)
+					for (k=1; k<j; k++)
+						NEON_Xor16(table+i*256*16+(j+k)*16, table+i*256*16+j*16, table+i*256*16+k*16);
 			else
 #endif
 				for (j=2; j<=0x80; j*=2)
@@ -280,6 +384,15 @@ void GCM_Base::SetKeyWithoutResync(const byte *userKey, size_t keylength, const 
 						SSE2_Xor16(table+1024+i*256+(j+k)*16, table+1024+i*256+j*16, table+1024+i*256+k*16);
 					}
 			else
+#elif CRYPTOPP_BOOL_NEON_AVAILABLE
+			if (HasNEON())
+				for (j=2; j<=8; j*=2)
+					for (k=1; k<j; k++)
+					{
+						NEON_Xor16(table+i*256+(j+k)*16, table+i*256+j*16, table+i*256+k*16);
+						NEON_Xor16(table+1024+i*256+(j+k)*16, table+1024+i*256+j*16, table+1024+i*256+k*16);
+					}
+			else
 #endif
 				for (j=2; j<=8; j*=2)
 					for (k=1; k<j; k++)
@@ -297,6 +410,12 @@ inline void GCM_Base::ReverseHashBufferIfNeeded()
 	if (HasCLMUL())
 	{
 		__m128i &x = *(__m128i *)(void *)HashBuffer();
+		x = _mm_shuffle_epi8(x, s_clmulConstants[1]);
+	}
+#elif CRYPTOPP_BOOL_ARM_CRYPTO_AVAILABLE
+	if (HasPMULL())
+	{
+		uint64x2_t &x = *(uint64x2_t*)HashBuffer();
 		x = _mm_shuffle_epi8(x, s_clmulConstants[1]);
 	}
 #endif
@@ -352,6 +471,8 @@ unsigned int GCM_Base::OptimalDataAlignment() const
 	return
 #if CRYPTOPP_BOOL_SSE2_AVAILABLE || defined(CRYPTOPP_X64_MASM_AVAILABLE)
 		HasSSE2() ? 16 :
+#elif CRYPTOPP_BOOL_NEON_AVAILABLE
+		HasNEON() ? 16 :
 #endif
 		GetBlockCipher().OptimalDataAlignment();
 }
@@ -447,6 +568,8 @@ size_t GCM_Base::AuthenticateBlocks(const byte *data, size_t len)
 	switch (2*(m_buffer.size()>=64*1024)
 #if CRYPTOPP_BOOL_SSE2_AVAILABLE || defined(CRYPTOPP_X64_MASM_AVAILABLE)
 		+ HasSSE2()
+#elif CRYPTOPP_BOOL_NEON_AVAILABLE
+		+ HasNEON()
 #endif
 		)
 	{
