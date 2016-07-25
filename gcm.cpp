@@ -150,8 +150,7 @@ inline __m128i CLMUL_Reduce(__m128i c0, __m128i c1, __m128i c2, const __m128i &r
 	c1 = _mm_srli_epi64(c1, 63);
 	c2 = _mm_slli_epi64(c2, 1);
 
-	const __m128i t = _mm_xor_si128(c2, c1);
-	return t;
+	return _mm_xor_si128(c2, c1);
 }
 
 inline __m128i CLMUL_GF_Mul(const __m128i &x, const __m128i &h, const __m128i &r)
@@ -184,35 +183,19 @@ inline uint64x2_t PMULL_Reduce(uint64x2_t c0, uint64x2_t c1, uint64x2_t c2, cons
 	shift c2 left 1 bit and xor in lowest bit of c1t
 	*/
 
-	// c1 = _mm_xor_si128(c1, _mm_slli_si128(c0, 8));
 	c1 = veorq_u64(c1, (uint64x2_t)vextq_s8(vdupq_n_s8(0), (int8x16_t)c0, 8));
-
-	// c1 = _mm_xor_si128(c1, _mm_clmulepi64_si128(c0, r, 0x10));
 	c1 = veorq_u64(c1, (uint64x2_t)vmull_p64(vgetq_lane_u64(c0, 0), vgetq_lane_u64(r, 1)));
-
-	// c0 = _mm_srli_si128(c0, 8);
-	c0 = (uint64x2_t)vmaxq_s8((int8x16_t)c0, vextq_s8((int8x16_t)c0, vdupq_n_s8(0), 8));
-
-	// c0 = _mm_clmulepi64_si128(c0, r, 0);
+	c0 = (uint64x2_t)vextq_u8((uint8x16_t)c0, vdupq_n_u8(0), 8);
+	c0 = veorq_u64(c0, c1);
+	c0 = vshlq_n_u64(c0, 1);
 	c0 = (uint64x2_t)vmull_p64(vgetq_lane_u64(c0, 0), vgetq_lane_u64(r, 0));
-
-	// c2 = _mm_xor_si128(c2, c0);
 	c2 = veorq_u64(c2, c0);
-
-	// c2 = _mm_xor_si128(c2, _mm_srli_si128(c1, 8));
-	c2 = veorq_u64(c2, (uint64x2_t)vmaxq_u8((uint8x16_t)c1, vextq_u8((uint8x16_t)c1, vdupq_n_u8(0), 8)));
-
-	// c1 = _mm_unpacklo_epi64(c1, c2);
+	c2 = veorq_u64(c2, (uint64x2_t)vextq_u8((uint8x16_t)c1, vdupq_n_u8(0), 8));
 	c1 = vcombine_u64(vgetq_lane_u64(c1, 0), vgetq_lane_u64(c2, 0));
-
-	// c1 = _mm_srli_epi64(c1, 63);
 	c1 = vshrq_n_u64(c1, 63);
-
-	// c2 = _mm_slli_epi64(c2, 1);
 	c2 = vshlq_n_u64(c2, 1);
 
-	const uint64x2_t t = veorq_u64(c2, c1);
-	return t;
+	return veorq_u64(c2, c1);
 }
 
 inline uint64x2_t PMULL_GF_Mul(const uint64x2_t &x, const uint64x2_t &h, const uint64x2_t &r)
