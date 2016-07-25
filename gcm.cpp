@@ -183,7 +183,7 @@ inline uint64x2_t PMULL_Reduce(uint64x2_t c0, uint64x2_t c1, uint64x2_t c2, cons
 	shift c2 left 1 bit and xor in lowest bit of c1t
 	*/
 
-	c1 = veorq_u64(c1, (uint64x2_t)vextq_s8(vdupq_n_s8(0), (int8x16_t)c0, 8));
+	c1 = veorq_u64(c1, (uint64x2_t)vextq_u8(vdupq_n_u8(0), (uint8x16_t)c0, 8));
 	c1 = veorq_u64(c1, (uint64x2_t)vmull_p64(vgetq_lane_u64(c0, 0), vgetq_lane_u64(r, 1)));
 	c0 = (uint64x2_t)vextq_u8((uint8x16_t)c0, vdupq_n_u8(0), 8);
 	c0 = veorq_u64(c0, c1);
@@ -259,12 +259,12 @@ void GCM_Base::SetKeyWithoutResync(const byte *userKey, size_t keylength, const 
 	{
 		const __m128i r = s_clmulConstants[0];
 		const __m128i t = _mm_load_si128((__m128i *)(void *)hashKey);
-		__m128i h0 = _mm_shuffle_epi8(t, s_clmulConstants[1]);
+		const __m128i h0 = _mm_shuffle_epi8(t, s_clmulConstants[1]);
 		__m128i h = h0;
 
 		for (i=0; i<tableSize; i+=32)
 		{
-			__m128i h1 = CLMUL_GF_Mul(h, h0, r);
+			const __m128i h1 = CLMUL_GF_Mul(h, h0, r);
 			_mm_storel_epi64((__m128i *)(void *)(table+i), h);
 			_mm_storeu_si128((__m128i *)(void *)(table+i+16), h1);
 			_mm_storeu_si128((__m128i *)(void *)(table+i+8), h);
@@ -279,7 +279,7 @@ void GCM_Base::SetKeyWithoutResync(const byte *userKey, size_t keylength, const 
 	{
 		const uint64x2_t r = s_clmulConstants[0];
 		const uint64x2_t t = (uint64x2_t)vrev64q_u8((uint8x16_t)vld1q_u64((uint64_t *)hashKey));
-		uint64x2_t h0 = vcombine_u64(vget_high_u64(t), vget_low_u64(t));
+		const uint64x2_t h0 = vcombine_u64(vget_high_u64(t), vget_low_u64(t));
 		uint64x2_t h = h0;
 
 		for (i=0; i<tableSize; i+=32)
@@ -290,7 +290,7 @@ void GCM_Base::SetKeyWithoutResync(const byte *userKey, size_t keylength, const 
 			//_mm_storeu_si128((__m128i *)(table+i+8), h);
 			//_mm_storel_epi64((__m128i *)(table+i+8), h1);
 
-			uint64x2_t h1 = PMULL_GF_Mul(h, h0, r);
+			const uint64x2_t h1 = PMULL_GF_Mul(h, h0, r);
 			vst1_u64((uint64_t *)(table+i), vget_low_u64(h));
 			vst1q_u64((uint64_t *)(table+i+16), h1);
 			vst1q_u64((uint64_t *)(table+i+8), h);
