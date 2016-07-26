@@ -415,12 +415,14 @@ inline void GCM_Base::ReverseHashBufferIfNeeded()
 	{
 		__m128i &x = *(__m128i *)(void *)HashBuffer();
 		x = _mm_shuffle_epi8(x, s_clmulConstants[1]);
+		return;
 	}
 #elif CRYPTOPP_BOOL_ARM_CRYPTO_AVAILABLE
 	if (HasPMULL())
 	{
 		uint64x2_t &x = *(uint64x2_t*)HashBuffer();
-		// TODO: x = _mm_shuffle_epi8(x, s_clmulConstants[1]);
+		x = (uint64x2_t)vrev64q_u8((uint8x16_t)vcombine_u64(vget_high_u64(x), vget_low_u64(x)));
+		return;
 	}
 #endif
 }
@@ -515,9 +517,9 @@ size_t GCM_Base::AuthenticateBlocks(const byte *data, size_t len)
 
 			while (true)
 			{
-				__m128i h0 = _mm_load_si128(table+i);
-				__m128i h1 = _mm_load_si128(table+i+1);
-				__m128i h01 = _mm_xor_si128(h0, h1);
+				const __m128i h0 = _mm_load_si128(table+i);
+				const __m128i h1 = _mm_load_si128(table+i+1);
+				const __m128i h2 = _mm_xor_si128(h0, h1);
 
 				if (++i == s)
 				{
@@ -526,7 +528,7 @@ size_t GCM_Base::AuthenticateBlocks(const byte *data, size_t len)
 					c0 = _mm_xor_si128(c0, _mm_clmulepi64_si128(d, h0, 0));
 					c2 = _mm_xor_si128(c2, _mm_clmulepi64_si128(d, h1, 1));
 					d = _mm_xor_si128(d, _mm_shuffle_epi32(d, _MM_SHUFFLE(1, 0, 3, 2)));
-					c1 = _mm_xor_si128(c1, _mm_clmulepi64_si128(d, h01, 0));
+					c1 = _mm_xor_si128(c1, _mm_clmulepi64_si128(d, h2, 0));
 					break;
 				}
 
@@ -534,7 +536,7 @@ size_t GCM_Base::AuthenticateBlocks(const byte *data, size_t len)
 				c0 = _mm_xor_si128(c0, _mm_clmulepi64_si128(d2, h0, 1));
 				c2 = _mm_xor_si128(c2, _mm_clmulepi64_si128(d, h1, 1));
 				d2 = _mm_xor_si128(d2, d);
-				c1 = _mm_xor_si128(c1, _mm_clmulepi64_si128(d2, h01, 1));
+				c1 = _mm_xor_si128(c1, _mm_clmulepi64_si128(d2, h2, 1));
 
 				if (++i == s)
 				{
@@ -543,7 +545,7 @@ size_t GCM_Base::AuthenticateBlocks(const byte *data, size_t len)
 					c0 = _mm_xor_si128(c0, _mm_clmulepi64_si128(d, h0, 0x10));
 					c2 = _mm_xor_si128(c2, _mm_clmulepi64_si128(d, h1, 0x11));
 					d = _mm_xor_si128(d, _mm_shuffle_epi32(d, _MM_SHUFFLE(1, 0, 3, 2)));
-					c1 = _mm_xor_si128(c1, _mm_clmulepi64_si128(d, h01, 0x10));
+					c1 = _mm_xor_si128(c1, _mm_clmulepi64_si128(d, h2, 0x10));
 					break;
 				}
 
@@ -551,7 +553,7 @@ size_t GCM_Base::AuthenticateBlocks(const byte *data, size_t len)
 				c0 = _mm_xor_si128(c0, _mm_clmulepi64_si128(d, h0, 0x10));
 				c2 = _mm_xor_si128(c2, _mm_clmulepi64_si128(d2, h1, 0x10));
 				d = _mm_xor_si128(d, d2);
-				c1 = _mm_xor_si128(c1, _mm_clmulepi64_si128(d, h01, 0x10));
+				c1 = _mm_xor_si128(c1, _mm_clmulepi64_si128(d, h2, 0x10));
 			}
 			data += s*16;
 			len -= s*16;
@@ -561,6 +563,114 @@ size_t GCM_Base::AuthenticateBlocks(const byte *data, size_t len)
 		}
 
 		_mm_store_si128((__m128i *)(void *)HashBuffer(), x);
+		return len;
+	}
+#elif CRYPTOPP_BOOL_ARM_CRYPTO_AVAILABLE
+	if (HasPMULL())
+	{
+		const uint64x2_t *table = (const uint64x2_t *)MulTable();
+		uint64x2_t x = vld1q_u64((const uint64_t*)HashBuffer());
+		const uint64x2_t r = s_clmulConstants[0], bswapMask1 = s_clmulConstants[1], bswapMask2 = s_clmulConstants[2];
+
+		while (len >= 16)
+		{
+			// size_t s = UnsignedMin(len/16, s_clmulTableSizeInBlocks), i=0;
+			// uint64x2_t d, d2 = _mm_shuffle_epi8(_mm_loadu_si128((const uint64x2_t *)(data+(s-1)*16)), bswapMask2);;
+			// uint64x2_t c0 = _mm_setzero_si128();
+			// uint64x2_t c1 = _mm_setzero_si128();
+			// uint64x2_t c2 = _mm_setzero_si128();
+
+			size_t s = UnsignedMin(len/16, s_clmulTableSizeInBlocks), i=0;
+			// TODO: uint64x2_t d, d2 = _mm_shuffle_epi8(_mm_loadu_si128((const uint64x2_t *)(data+(s-1)*16)), bswapMask2);
+			uint64x2_t d, d2;
+			uint64x2_t c0 = vdupq_n_u64(0);
+			uint64x2_t c1 = vdupq_n_u64(0);
+			uint64x2_t c2 = vdupq_n_u64(0);
+
+			while (true)
+			{
+				//uint64x2_t h0 = _mm_load_si128(table+i);
+				//uint64x2_t h1 = _mm_load_si128(table+i+1);
+				//uint64x2_t h2 = _mm_xor_si128(h0, h1);
+
+				const uint64x2_t h0 = vld1q_u64((const uint64_t*)(table+i));
+				const uint64x2_t h1 = vld1q_u64((const uint64_t*)(table+i+1));
+				const uint64x2_t h2 = veorq_u64(h0, h1);
+
+				if (++i == s)
+				{
+					//  d = _mm_shuffle_epi8(_mm_loadu_si128((const uint64x2_t *)data), bswapMask1);
+					//  d = _mm_xor_si128(d, x);
+					// c0 = _mm_xor_si128(c0, _mm_clmulepi64_si128(d, h0, 0));
+					// c2 = _mm_xor_si128(c2, _mm_clmulepi64_si128(d, h1, 1));
+					//  d = _mm_xor_si128(d, _mm_shuffle_epi32(d, _MM_SHUFFLE(1, 0, 3, 2)));
+					// c1 = _mm_xor_si128(c1, _mm_clmulepi64_si128(d, h2, 0));
+
+					// TODO: d = _mm_shuffle_epi8(_mm_loadu_si128((const uint64x2_t *)data), bswapMask1);
+					 d = veorq_u64(d, x);
+					c0 = veorq_u64(c0, (uint64x2_t)vmull_p64(vgetq_lane_u64(d, 0), vgetq_lane_u64(h0, 0)));
+					c2 = veorq_u64(c2, (uint64x2_t)vmull_p64(vgetq_lane_u64(d, 1), vgetq_lane_u64(h1, 0)));
+					// TODO: d = veorq_u64(d, _mm_shuffle_epi32(d, _MM_SHUFFLE(1, 0, 3, 2)));
+					c1 = veorq_u64(c1, (uint64x2_t)vmull_p64(vgetq_lane_u64(d, 0), vgetq_lane_u64(h2, 0)));
+
+					break;
+				}
+
+				// d = _mm_shuffle_epi8(_mm_loadu_si128((const uint64x2_t *)(data+(s-i)*16-8)), bswapMask2);
+				// c0 = _mm_xor_si128(c0, _mm_clmulepi64_si128(d2, h0, 1));
+				// c2 = _mm_xor_si128(c2, _mm_clmulepi64_si128(d, h1, 1));
+				// d2 = _mm_xor_si128(d2, d);
+				// c1 = _mm_xor_si128(c1, _mm_clmulepi64_si128(d2, h2, 1));
+
+				// TODO: d = _mm_shuffle_epi8(_mm_loadu_si128((const uint64x2_t *)(data+(s-i)*16-8)), bswapMask2);
+				c0 = veorq_u64(c0, (uint64x2_t)vmull_p64(vgetq_lane_u64(d2, 1), vgetq_lane_u64(h0, 0)));
+				c2 = veorq_u64(c2, (uint64x2_t)vmull_p64(vgetq_lane_u64(d, 1), vgetq_lane_u64(h1, 0)));
+				d2 = veorq_u64(d2, d);
+				c1 = veorq_u64(c1, (uint64x2_t)vmull_p64(vgetq_lane_u64(d2, 1), vgetq_lane_u64(h2, 0)));
+
+				if (++i == s)
+				{
+					//  d = _mm_shuffle_epi8(_mm_loadu_si128((const uint64x2_t *)data), bswapMask1);
+					//  d = _mm_xor_si128(d, x);
+					// c0 = _mm_xor_si128(c0, _mm_clmulepi64_si128(d, h0, 0x10));
+					// c2 = _mm_xor_si128(c2, _mm_clmulepi64_si128(d, h1, 0x11));
+					//  d = _mm_xor_si128(d, _mm_shuffle_epi32(d, _MM_SHUFFLE(1, 0, 3, 2)));
+					// c1 = _mm_xor_si128(c1, _mm_clmulepi64_si128(d, h2, 0x10));
+
+					// TODO: d = _mm_shuffle_epi8(_mm_loadu_si128((const uint64x2_t *)data), bswapMask1);
+					 d = veorq_u64(d, x);
+					c0 = veorq_u64(c0, (uint64x2_t)vmull_p64(vgetq_lane_u64(d, 0), vgetq_lane_u64(h0, 1)));
+					c2 = veorq_u64(c2, (uint64x2_t)vmull_high_p64((poly64x2_t)d, (poly64x2_t)h1));
+					// TODO: d = veorq_u64(d, _mm_shuffle_epi32(d, _MM_SHUFFLE(1, 0, 3, 2)));
+					c1 = veorq_u64(c1, (uint64x2_t)vmull_p64(vgetq_lane_u64(d, 0), vgetq_lane_u64(h2, 1)));
+
+					break;
+				}
+
+				// d2 = _mm_shuffle_epi8(_mm_loadu_si128((const uint64x2_t *)(data+(s-i)*16-8)), bswapMask1);
+				// c0 = _mm_xor_si128(c0, _mm_clmulepi64_si128(d, h0, 0x10));
+				// c2 = _mm_xor_si128(c2, _mm_clmulepi64_si128(d2, h1, 0x10));
+				//  d = _mm_xor_si128(d, d2);
+				// c1 = _mm_xor_si128(c1, _mm_clmulepi64_si128(d, h2, 0x10));
+
+				// TODO: d2 = _mm_shuffle_epi8(_mm_loadu_si128((const uint64x2_t *)(data+(s-i)*16-8)), bswapMask1);
+				c0 = veorq_u64(c0, (uint64x2_t)vmull_p64(vgetq_lane_u64(d, 0), vgetq_lane_u64(h0, 1)));
+				c2 = veorq_u64(c2, (uint64x2_t)vmull_p64(vgetq_lane_u64(d2, 0), vgetq_lane_u64(h1, 1)));
+				 d = veorq_u64(d, d2);
+				c1 = veorq_u64(c1, (uint64x2_t)vmull_p64(vgetq_lane_u64(d, 0), vgetq_lane_u64(h2, 1)));
+			}
+			data += s*16;
+			len -= s*16;
+
+			// c1 = _mm_xor_si128(veorq_u64(c1, c0), c2);
+			c1 = veorq_u64(veorq_u64(c1, c0), c2);
+
+			x = PMULL_Reduce(c0, c1, c2, r);
+		}
+
+		// _mm_store_si128((uint64x2_t *)(void *)HashBuffer(), x);
+		vst1q_u64((uint64_t *)HashBuffer(), x);
+
 		return len;
 	}
 #endif
