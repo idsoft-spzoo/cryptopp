@@ -548,7 +548,7 @@ size_t GCM_Base::AuthenticateBlocks(const byte *data, size_t len)
 				if (++i == s)
 				{
 					t = _mm_shuffle_epi8(_mm_loadu_si128((const __m128i *)(const void *)data), mask1);
-					d = _mm_xor_si128(d, x);
+					d = _mm_xor_si128(t, x);
 					c0 = _mm_xor_si128(c0, _mm_clmulepi64_si128(d, h0, 0x10));
 					c2 = _mm_xor_si128(c2, _mm_clmulepi64_si128(d, h1, 0x11));
 					d = _mm_xor_si128(d, _mm_shuffle_epi32(d, _MM_SHUFFLE(1, 0, 3, 2)));
