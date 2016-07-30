@@ -197,7 +197,7 @@ inline uint64x2_t PMULL_Reduce(uint64x2_t c0, uint64x2_t c1, uint64x2_t c2, cons
 	c0 = (uint64x2_t)vmull_p64(vgetq_lane_u64(c0, 0), vgetq_lane_u64(r, 0));
 	c2 = veorq_u64(c2, c0);
 	c2 = veorq_u64(c2, (uint64x2_t)vextq_u8((uint8x16_t)c1, vdupq_n_u8(0), 8));
-	c1 = vcombine_u64(vgetq_lane_u64(c1, 0), vgetq_lane_u64(c2, 0));
+	c1 = vcombine_u64(vget_low_u64(c1), vget_low_u64(c2));
 	c1 = vshrq_n_u64(c1, 63);
 	c2 = vshlq_n_u64(c2, 1);
 
