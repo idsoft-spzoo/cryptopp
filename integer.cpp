@@ -66,16 +66,7 @@
 #endif
 
 #define CRYPTOPP_INTEGER_SSE2 (CRYPTOPP_BOOL_SSE2_AVAILABLE && CRYPTOPP_BOOL_X86)
-
-// Debian QEMU/ARMEL issue in MultiplyTop; see http://github.com/weidai11/cryptopp/issues/31.
-#if __ARMEL__ && (CRYPTOPP_GCC_VERSION >= 40900) && (CRYPTOPP_GCC_VERSION < 70000) && __OPTIMIZE__
-# define WORKAROUND_ARMEL_BUG 1
-#endif
-
-#if WORKAROUND_ARMEL_BUG
-# pragma GCC push_options
-# pragma GCC optimize("O1")
-#endif
+#define CRYPTOPP_INTEGER_PMULL (CRYPTOPP_BOOL_ARM64 && CRYPTOPP_BOOL_ARM_CRYPTO_AVAILABLE)
 
 NAMESPACE_BEGIN(CryptoPP)
 
@@ -159,6 +150,8 @@ static word AtomicInverseModPower2(word A)
 		#endif
 	#elif defined(__DECCXX)
 		#define MultiplyWordsLoHi(p0, p1, a, b)		p0 = a*b; p1 = asm("umulh %a0, %a1, %v0", a, b);
+	#elif CRYPTOPP_INTEGER_PMULL
+		#define MultiplyWordsLoHi(p0, p1, a, b)		{ uint64x2_t r; asm("pmull %0.1q, %1.1d, %2.1d;" : "=w"(r) : "w"(a), "w"(b) : "cc"); p0=r[0]; p1=r[1]; }
 	#elif defined(__x86_64__)
 		#if defined(__SUNPRO_CC) && __SUNPRO_CC < 0x5100
 			// Sun Studio's gcc-style inline assembly is heavily bugged as of version 5.9 Patch 124864-09 2008/12/16, but this one works
@@ -4558,9 +4551,5 @@ std::string IntToString<word64>(word64 value, unsigned int base)
 }
 
 NAMESPACE_END
-
-#if WORKAROUND_ARMEL_BUG
-# pragma GCC pop_options
-#endif
 
 #endif
