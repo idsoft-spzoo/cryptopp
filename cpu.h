@@ -65,6 +65,34 @@
 
 #endif // CRYPTOPP_DISABLE_ASM
 
+// Applies to both X86/X32/X64 and ARM32/ARM64. And we've got MIPS devices on the way.
+#if defined(_MSC_VER) || defined(__BORLANDC__)
+# define CRYPTOPP_MS_STYLE_INLINE_ASSEMBLY
+#else
+# define CRYPTOPP_GNU_STYLE_INLINE_ASSEMBLY
+#endif
+
+// Applies to both X86/X32/X64 and ARM32/ARM64
+#if defined(CRYPTOPP_LLVM_CLANG_VERSION) || defined(CRYPTOPP_APPLE_CLANG_VERSION) || defined(CRYPTOPP_CLANG_INTEGRATED_ASSEMBLER)
+	#define NEW_LINE "\n"
+	#define INTEL_PREFIX ".intel_syntax;"
+	#define INTEL_NOPREFIX ".intel_syntax;"
+	#define ATT_PREFIX ".att_syntax;"
+	#define ATT_NOPREFIX ".att_syntax;"
+#elif defined(__GNUC__)
+	#define NEW_LINE
+	#define INTEL_PREFIX ".intel_syntax prefix;"
+	#define INTEL_NOPREFIX ".intel_syntax noprefix;"
+	#define ATT_PREFIX ".att_syntax prefix;"
+	#define ATT_NOPREFIX ".att_syntax noprefix;"
+#else
+	#define NEW_LINE
+	#define INTEL_PREFIX
+	#define INTEL_NOPREFIX
+	#define ATT_PREFIX
+	#define ATT_NOPREFIX
+#endif
+
 #ifdef CRYPTOPP_GENERATE_X64_MASM
 
 #define CRYPTOPP_X86_ASM_AVAILABLE
@@ -573,27 +601,6 @@ inline int GetCacheLineSize()
 	AS2(	add		outputPtr, increment*16)
 
 #endif  //  X86/X32/X64
-
-// Applies to both X86/X32/X64 and ARM32/ARM64
-#if defined(CRYPTOPP_LLVM_CLANG_VERSION) || defined(CRYPTOPP_APPLE_CLANG_VERSION) || defined(CRYPTOPP_CLANG_INTEGRATED_ASSEMBLER)
-	#define NEW_LINE "\n"
-	#define INTEL_PREFIX ".intel_syntax;"
-	#define INTEL_NOPREFIX ".intel_syntax;"
-	#define ATT_PREFIX ".att_syntax;"
-	#define ATT_NOPREFIX ".att_syntax;"
-#elif defined(__GNUC__)
-	#define NEW_LINE
-	#define INTEL_PREFIX ".intel_syntax prefix;"
-	#define INTEL_NOPREFIX ".intel_syntax noprefix;"
-	#define ATT_PREFIX ".att_syntax prefix;"
-	#define ATT_NOPREFIX ".att_syntax noprefix;"
-#else
-	#define NEW_LINE
-	#define INTEL_PREFIX
-	#define INTEL_NOPREFIX
-	#define ATT_PREFIX
-	#define ATT_NOPREFIX
-#endif
 
 NAMESPACE_END
 
