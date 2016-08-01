@@ -511,7 +511,7 @@ NAMESPACE_END
 # endif
 #endif
 
-// Requires ARMv8 and ACLE 2.0.
+// Requires ARMv8 and ACLE 2.0. For GCC, requires 4.8 and above.
 // Microsoft plans to support ARM-64, but its not clear how to detect it.
 // TODO: Add MSC_VER and ARM-64 platform define when available
 #if !defined(CRYPTOPP_BOOL_ARM_CRC32_AVAILABLE) && !defined(CRYPTOPP_DISABLE_ASM)
@@ -520,7 +520,7 @@ NAMESPACE_END
 # endif
 #endif
 
-// Requires ARMv8 and ACLE 2.0.
+// Requires ARMv8 and ACLE 2.0. For GCC, requires 4.8 and above.
 // Microsoft plans to support ARM-64, but its not clear how to detect it.
 // TODO: Add MSC_VER and ARM-64 platform define when available
 #if !defined(CRYPTOPP_BOOL_ARM_CRYPTO_AVAILABLE) && !defined(CRYPTOPP_DISABLE_ASM)
